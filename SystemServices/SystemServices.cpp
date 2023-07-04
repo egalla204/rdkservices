@@ -66,7 +66,7 @@
 using namespace std;
 
 #define API_VERSION_NUMBER_MAJOR 1
-#define API_VERSION_NUMBER_MINOR 4
+#define API_VERSION_NUMBER_MINOR 5
 #define API_VERSION_NUMBER_PATCH 0
 
 #define MAX_REBOOT_DELAY 86400 /* 24Hr = 86400 sec */
@@ -92,12 +92,10 @@ using namespace std;
 #define STORE_DEMO_LINK "file:///opt/persistent/store-mode-video/videoFile.mp4"
 
 #define RFC_LOG_UPLOAD "Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.LogUploadBeforeDeepSleep.Enable"
-#define TR181_SYSTEM_FRIENDLY_NAME "Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.SystemServices.FriendlyName"
 
 #define LOG_UPLOAD_STATUS_SUCCESS "UPLOAD_SUCCESS"
 #define LOG_UPLOAD_STATUS_FAILURE "UPLOAD_FAILURE"
 #define LOG_UPLOAD_STATUS_ABORTED "UPLOAD_ABORTED"
-
 
 /**
  * @struct firmwareUpdate
@@ -147,6 +145,34 @@ bool setGzEnabled(bool enabled)
         printf(" GZ_FILE_ERROR: Can't open file for write mode\n");
     }
     return retVal;
+}
+
+const char* getWakeupSrcString(uint32_t src)
+{
+    
+    switch (src)
+    {
+    case WAKEUPSRC_VOICE:
+         return "WAKEUPSRC_VOICE";
+    case WAKEUPSRC_PRESENCE_DETECTION:
+         return "WAKEUPSRC_PRESENCE_DETECTION";
+    case WAKEUPSRC_BLUETOOTH:
+         return "WAKEUPSRC_BLUETOOTH";
+    case WAKEUPSRC_WIFI:
+         return "WAKEUPSRC_WIFI";
+    case WAKEUPSRC_IR:
+         return "WAKEUPSRC_IR";
+    case WAKEUPSRC_POWER_KEY:
+         return "WAKEUPSRC_POWER_KEY";
+    case WAKEUPSRC_TIMER:
+         return "WAKEUPSRC_TIMER";
+    case WAKEUPSRC_CEC:
+         return "WAKEUPSRC_CEC";
+    case WAKEUPSRC_LAN:
+         return "WAKEUPSRC_LAN";
+    default:
+         return "";
+    }
 }
 
 /**
@@ -332,8 +358,6 @@ namespace WPEFramework {
             m_networkStandbyModeValid = false;
             m_powerStateBeforeRebootValid = false;
             m_isPwrMgr2RFCEnabled = false;
-            m_friendlyName = "Living Room";
-
 
 #ifdef ENABLE_DEVICE_MANUFACTURER_INFO
 	    m_ManufacturerDataHardwareIdValid = false;
@@ -433,9 +457,8 @@ namespace WPEFramework {
             registerMethod("getPowerStateIsManagedByDevice", &SystemServices::getPowerStateIsManagedByDevice, this);
     	    registerMethod("setTerritory", &SystemServices::setTerritory, this);
 	    registerMethod("getTerritory", &SystemServices::getTerritory, this);
-#ifdef ENABLE_SET_WAKEUP_SRC_CONFIG
             registerMethod("setWakeupSrcConfiguration", &SystemServices::setWakeupSrcConfiguration, this);
-#endif //ENABLE_SET_WAKEUP_SRC_CONFIG
+	    registerMethod("getWakeupSrcConfiguration", &SystemServices::getWakeupSrcConfiguration, this);
 
             // version 2 APIs
             registerMethod(_T("getTimeZones"), &SystemServices::getTimeZones, this);
@@ -464,9 +487,6 @@ namespace WPEFramework {
                 &SystemServices::getPlatformConfiguration, this);
             GetHandler(2)->Register<JsonObject, PlatformCaps>("getPlatformConfiguration",
                 &SystemServices::getPlatformConfiguration, this);
-	    registerMethod("getFriendlyName", &SystemServices::getFriendlyName, this);
-            registerMethod("setFriendlyName", &SystemServices::setFriendlyName, this);
-
         }
 
         SystemServices::~SystemServices()
@@ -517,14 +537,6 @@ namespace WPEFramework {
                 Core::SystemInfo::SetEnvironment(_T("TZ"), tzenv.c_str());
             }
 #endif
-            RFC_ParamData_t param = {0};
-            WDMP_STATUS status = getRFCParameter((char*)"thunderapi", TR181_SYSTEM_FRIENDLY_NAME, &param);
-            if(WDMP_SUCCESS == status && param.type == WDMP_STRING)
-            {
-                m_friendlyName = param.value;
-                LOGINFO("Success Getting the friendly name value :%s \n",m_friendlyName.c_str());
-            }
-
             /* On Success; return empty to indicate no error text. */
             return (string());
         }
@@ -1209,7 +1221,7 @@ namespace WPEFramework {
                 JsonObject& response)
         {
             LOGWARN("SystemService updatingFirmware\n");
-            string command("/lib/rdk/swupdate_utility.sh 0 4 >> /opt/logs/swupdate.log &");
+            string command("/lib/rdk/deviceInitiatedFWDnld.sh 0 4 >> /opt/logs/swupdate.log &");
             Utils::cRunScript(command.c_str());
             returnResponse(true);
         }
@@ -2314,6 +2326,7 @@ namespace WPEFramework {
             sendNotify(EVT_ONTEMPERATURETHRESHOLDCHANGED, params);
         }
 
+
         /***
          * @brief : To set the Time to TZ_FILE.
          * @param1[in]	: {"params":{"timeZone":"<string>"}}
@@ -2431,38 +2444,6 @@ namespace WPEFramework {
 		returnResponse(resp);
 	}
 
-        uint32_t SystemServices::getFriendlyName(const JsonObject& parameters, JsonObject& response)
-        {
-            bool resp = true;
-            response["friendlyName"] = m_friendlyName;
-            returnResponse(resp);
-        }
-
-        uint32_t SystemServices::setFriendlyName(const JsonObject& parameters, JsonObject& response)
-        {
-            LOGINFOMETHOD();
-            returnIfParamNotFound(parameters, "friendlyName");
-            string friendlyName = parameters["friendlyName"].String();
-            bool success = true;
-            LOGWARN("SystemServices::setFriendlyName  :%s \n", friendlyName.c_str());
-            if(m_friendlyName != friendlyName)
-            {
-                m_friendlyName = friendlyName;
-                JsonObject params;
-                params["friendlyName"] = m_friendlyName;
-                sendNotify("onFriendlyNameChanged", params);
-                //write to persistence storage
-                WDMP_STATUS status = setRFCParameter((char*)"thunderapi",
-                       TR181_SYSTEM_FRIENDLY_NAME,m_friendlyName.c_str(),WDMP_STRING);
-                if ( WDMP_SUCCESS == status ){
-                    LOGINFO("Success Setting the friendly name value\n");
-                }
-                else {
-                    LOGINFO("Failed Setting the friendly name value %s\n",getRFCErrorString(status));
-                }
-            }
-            returnResponse(success);
-        }
 
 	uint32_t SystemServices::setTerritory(const JsonObject& parameters, JsonObject& response)
 	{
@@ -2568,16 +2549,16 @@ namespace WPEFramework {
 				m_strTerritory = str.substr(str.find(":")+1,str.length());
 				int index = m_strStandardTerritoryList.find(m_strTerritory);
 				if((m_strTerritory.length() == 3) && (index >=0 && index <= 1100) ){
-
 					getline (inFile, str);
 					if(str.length() > 0){
-						m_strRegion = str.substr(str.find(":")+1,str.length());
-						if(!isRegionValid(m_strRegion)){
-							m_strTerritory = "";
-							m_strRegion = "";
-							LOGERR("Territory file corrupted  - region : %s",m_strRegion.c_str());
-							LOGERR("Returning empty values");
-						}
+					    m_strRegion = str.substr(str.find(":")+1,str.length());
+					    if(!isRegionValid(m_strRegion))
+					    {
+						    m_strTerritory = "";
+						    m_strRegion = "";
+						    LOGERR("Territory file corrupted  - region : %s",m_strRegion.c_str());
+						    LOGERR("Returning empty values");
+					    }
 					}
 				}
 				else{
@@ -3795,7 +3776,7 @@ namespace WPEFramework {
                     if (!trial.compare(0, 8, str2)) {
                         std::string gp = trial.c_str();
                         std::string delimiter = "=";
-                        clientVersionStr = gp.substr((gp.find(delimiter)+1));
+                        clientVersionStr = gp.substr((gp.find(delimiter)+1), 12);
                         break;
                     }
                 }
@@ -3899,7 +3880,6 @@ namespace WPEFramework {
 			return "unknown";
 		}
 	}
-
         /***
          * TODO: Stub implementation; Decide whether needed or not since setProperty
          * and getProperty functionalities are XRE/RTRemote dependent.
@@ -4003,11 +3983,9 @@ namespace WPEFramework {
 
             returnResponse(retVal);
         }
-
-#ifdef ENABLE_SET_WAKEUP_SRC_CONFIG
-	/***
+        /***
          * @brief : To set the wakeup source configuration.
-         * @param1[in] : {"params":{ "wakeupSrc": <int>, "config": <int>}
+         * @param1[in] : {"params":{"powerState":<string>,"wakeupSources":[{<WakeupSrcTrigger string>:<bool>},...]}
          * @param2[out] : {"result":{"success":<bool>}}
          * @return     : Core::<StatusCode>
          */
@@ -4015,55 +3993,119 @@ namespace WPEFramework {
                 JsonObject& response)
         {
             bool status = false;
-            string src, value;
-            WakeupSrcType_t srcType;
-            bool config;
-            int paramErr = 0;
-            IARM_Bus_PWRMgr_SetWakeupSrcConfig_Param_t param;
-            if (parameters.HasLabel("wakeupSrc") && parameters.HasLabel("config")) {
-                src = parameters["wakeupSrc"].String();
-                srcType = (WakeupSrcType_t)atoi(src.c_str());
-                value = parameters["config"].String();
-                config = (bool)atoi(value.c_str());
-
-                switch(srcType){
-                    case WAKEUPSRC_VOICE:
-                    case WAKEUPSRC_PRESENCE_DETECTION:
-                    case WAKEUPSRC_BLUETOOTH:
-                    case WAKEUPSRC_WIFI:
-                    case WAKEUPSRC_IR:
-                    case WAKEUPSRC_POWER_KEY:
-                    case WAKEUPSRC_TIMER:
-                    case WAKEUPSRC_CEC:
-                    case WAKEUPSRC_LAN:
-                        param.srcType = srcType;
-                        param.config = config;
-                        break;
-                    default:
-                        LOGERR("setWakeupSrcConfiguration invalid parameter\n");
-                        status = false;
-                        paramErr = 1;
+            unsigned int srcType = 0x0;
+            unsigned int config = 0x0;
+            unsigned int powerState = 0x0;
+            LOGWARN(" %s: %d Entry \n",__FUNCTION__,__LINE__);
+            if (parameters.HasLabel("powerState")) 
+            {
+                string state = parameters["powerState"].String();
+                if(!state.compare("LIGHT_SLEEP"))
+                    powerState = 1 << IARM_BUS_PWRMGR_POWERSTATE_STANDBY_LIGHT_SLEEP;
+                if(!state.compare("DEEP_SLEEP"))
+                    powerState =  1 << IARM_BUS_PWRMGR_POWERSTATE_STANDBY_DEEP_SLEEP;
+                if(!state.compare("DEFAULT"))
+                    powerState = (1<<IARM_BUS_PWRMGR_POWERSTATE_STANDBY_LIGHT_SLEEP) | \
+                                             (1 << IARM_BUS_PWRMGR_POWERSTATE_STANDBY_DEEP_SLEEP);
+            }
+            else{
+                    powerState = (1<<IARM_BUS_PWRMGR_POWERSTATE_STANDBY_LIGHT_SLEEP) | \
+                                             (1 << IARM_BUS_PWRMGR_POWERSTATE_STANDBY_DEEP_SLEEP);
+            }
+            LOGWARN("%s: %d Power State stored:%x \r\n",__FUNCTION__,__LINE__,powerState);
+            if (parameters.HasLabel("wakeupSources")) 
+            {
+                JsonArray wakeupSrcs = parameters["wakeupSources"].Array();
+                for(uint32_t i =0; i<wakeupSrcs.Length();i++)
+                {
+                    JsonObject wakeupSrc = wakeupSrcs.Get(i).Object();
+                    for(uint32_t src = WAKEUPSRC_VOICE; src < WAKEUPSRC_MAX; src++)
+                    {
+                        if(wakeupSrc.HasLabel(getWakeupSrcString(src)))
+                        {
+                            srcType |= (1<<src);
+                            if(wakeupSrc[getWakeupSrcString(src)].Boolean())
+                            {
+                                config |= (1<<src);
+                            }
+                            if((src == WAKEUPSRC_WIFI) || (src == WAKEUPSRC_LAN))
+                            {
+                                m_networkStandbyModeValid = false;
+                            }
+                            break;
+                        }
+                    }
                 }
-
-                if(paramErr == 0) {
-
+                LOGWARN(" %s: %d srcType:%x  config :%x \n",__FUNCTION__,__LINE__,srcType ,config);
+                if(srcType) {
+                    IARM_Bus_PWRMgr_WakeupSrcConfig_Param_t param;
+                    param.pwrMode = powerState;
+                    param.srcType = srcType;
+                    param.config = config;
                     IARM_Result_t res = IARM_Bus_Call(IARM_BUS_PWRMGR_NAME,
                                            IARM_BUS_PWRMGR_API_SetWakeupSrcConfig, (void *)&param,
                                            sizeof(param));
-
                     if (IARM_RESULT_SUCCESS == res) {
                         status = true;
                     } else {
                         status = false;
                     }
                 }
-            } else {
-                LOGERR("setWakeupSrcConfiguration Missing Key Values\n");
-                populateResponseWithError(SysSrv_MissingKeyValues, response);
             }
             returnResponse(status);
         }
-#endif //ENABLE_SET_WAKEUP_SRC_CONFIG
+        
+        /***
+         * @brief : To get the wakeup source configuration.
+         * @param1[out] : {"params":{"powerState":<string>,"wakeupSources":[{<WakeupSrcTrigger string>:<bool>},...]}
+         * @param2[out] : {"result":{"success":<bool>}}
+         * @return     : Core::<StatusCode>
+         */
+
+        uint32_t SystemServices::getWakeupSrcConfiguration(const JsonObject& parameters,
+                JsonObject& response)
+        {
+            JsonArray wakeupSrc;
+            IARM_Bus_PWRMgr_WakeupSrcConfig_Param_t param;
+            bool status = false;
+            IARM_Result_t res = IARM_Bus_Call(IARM_BUS_PWRMGR_NAME,
+                                  IARM_BUS_PWRMGR_API_GetWakeupSrcConfig, (void *)&param,
+                                  sizeof(param));
+            if (IARM_RESULT_SUCCESS == res) {
+                LOGWARN(" %s: %d res:%d srcType :%x  config :%x \n",__FUNCTION__,__LINE__,res,param.srcType,param.config);
+                status = true;
+                for(uint32_t src = WAKEUPSRC_VOICE; src <  WAKEUPSRC_MAX; src++)
+                {
+                     JsonObject sourceConfig;
+                     if(param.srcType & (1<<src))
+                     {
+                        sourceConfig[getWakeupSrcString(src)] = (param.config & (1<<src))?true:false;
+                        wakeupSrc.Add(sourceConfig);
+                     }
+                }
+                if(param.pwrMode == (1<<IARM_BUS_PWRMGR_POWERSTATE_STANDBY_LIGHT_SLEEP) )
+                {
+                    response["powerState"] = "LIGHT_SLEEP";
+                }
+                else if(param.pwrMode == (1 << IARM_BUS_PWRMGR_POWERSTATE_STANDBY_DEEP_SLEEP))
+                {
+                    response["powerState"] = "DEEP_SLEEP";
+                }
+                else
+                {
+                    response["powerState"] = "DEFAULT";
+                }
+                if(wakeupSrc.Length() > 0)
+                {
+                    response["wakeupSources"] = wakeupSrc;
+                }
+
+            } else {
+               status = false;
+            }
+            returnResponse(status);
+        }
+
 
         /***
          * @brief : To handle the event of Power State change.
